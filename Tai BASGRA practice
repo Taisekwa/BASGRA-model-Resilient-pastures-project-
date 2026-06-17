@@ -1,0 +1,454 @@
+# =========================================================
+# RUN BASGRA AND EXPORT OUTPUTS
+# =========================================================
+
+setwd("I:/Resilient pastures/BASGRA_nz/BASGRA_Master/basgra_nz-2021")
+
+# -----------------------------
+# Load packages
+# -----------------------------
+library(tidyverse)
+library(tictoc)
+library(lubridate)
+library(ggplot2)
+
+tic()
+
+cat(file = stderr(), "Starting BASGRA run\n")
+
+# -----------------------------
+# BASGRA DLL
+# -----------------------------
+BASGRA_DLL <- "model/BASGRA_WG.DLL"
+
+# -----------------------------
+# User options
+# -----------------------------
+models      <- c("CESM1-CAM5")
+slice_starts <- c(2010)
+parameters  <- c("run_mean")
+PAWs        <- c(50)
+CO2         <- 350
+
+PAWmatrix <- data.frame()
+
+# =========================================================
+# MAIN LOOP
+# =========================================================
+
+for (slice_start in slice_starts) {
+  
+  # -----------------------------
+  # Time slice settings
+  # -----------------------------
+  slice_length <- 10
+  slice_end    <- slice_start + slice_length
+  year_range   <- paste0(slice_start, "-", slice_end)
+  
+  # -----------------------------
+  # Location file
+  # -----------------------------
+  file_longlats_name <- "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/PAW/PAW data from Landcare/VCSN_Edendale_WGS84_fixed.csv"
+  
+  file_longlats <- read.csv(file_longlats_name)
+  
+  # Optional: create coordinates from file
+  # longs <- file_longlats[,2]
+  # lats  <- file_longlats[,3]
+  # longlats <- paste0(longs, "_", lats)
+  
+  # Manual location
+  longlats <- c("168.77501_-46.275")
+  
+  # -----------------------------
+  # Initialise BASGRA
+  # -----------------------------
+  source("scripts/initialise_BASGRA_general.R")
+  
+  # =========================================================
+  # MODEL LOOP
+  # =========================================================
+  
+  for (model in models) {
+    
+    # -----------------------------
+    # RCP selection
+    # -----------------------------
+    if (slice_start %in% c(1980, 1990)) {
+      rcps <- c("RCPpast")
+    } else {
+      rcps <- c("RCP8.5", "RCP4.5")
+    }
+    
+    for (rcp in rcps) {
+      
+      for (longlat in longlats) {
+        
+        cat(file = stderr(),
+            "\nRunning:",
+            model,
+            rcp,
+            year_range,
+            longlat,
+            "\n")
+        
+        # =====================================================
+        # WEATHER FILE
+        # =====================================================
+        
+        file_weather_name <- paste0(
+          "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/Climate/",
+          "BASGRA Climate - Gleneden/",
+          year_range, "/",
+          model, "/",
+          longlat, "_",
+          model, "_",
+          rcp,
+          ".csv"
+        )
+        
+        if (!file.exists(file_weather_name)) {
+          
+          warning(paste("Weather file missing:", file_weather_name))
+          next
+          
+        }
+        
+        file_weather <- read.csv(
+          file_weather_name,
+          header = FALSE
+        )
+        
+        # Remove last row if problematic
+        file_weather <- head(file_weather, -1)
+        
+        # Remove junk row if empty
+        if (nrow(file_weather) >= 367) {
+          
+          if (file_weather$V2[367] == "") {
+            
+            file_weather <- file_weather[-367, ]
+            
+          }
+        }
+        
+        # Rewrite cleaned weather file
+        write.table(
+          file_weather,
+          file = file_weather_name,
+          quote = FALSE,
+          sep = ",",
+          col.names = FALSE,
+          row.names = FALSE
+        )
+        
+        # =====================================================
+        # PARAMETERS
+        # =====================================================
+        
+        parameter_location <- "run_mean"
+        
+        file_params  <- paste0(parameter_location,
+                               "/BASGRA_parModes.txt")
+        
+        parcol <- 2 + 8 * (2 - 1)
+        
+        file_harvest <- "run_mean/harvest_auto.txt"
+        
+        days_harvest <- as.matrix(
+          read.table(
+            file = file_harvest,
+            sep = "\t"
+          )
+        )
+        
+        # Automated harvest option
+        if (days_harvest[1,1] == -1) {
+          
+          days_harvest <- matrix(
+            -1,
+            nrow = 100,
+            ncol = 3
+          )
+          
+        }
+        
+        # =====================================================
+        # DATE SETTINGS
+        # =====================================================
+        
+        year_start <- as.integer(slice_start)
+        year_stop  <- as.integer(slice_end)
+        
+        doy_start <- ifelse(
+          leap_year(year_start),
+          122,
+          121
+        )
+        
+        doy_stop <- ifelse(
+          leap_year(year_stop),
+          121,
+          120
+        )
+        
+        NDAYS <- as.integer(
+          difftime(
+            as.Date(doy_stop - 1,
+                    origin = paste(year_stop, 1, 1, sep = "-")),
+            as.Date(doy_start - 1,
+                    origin = paste(year_start, 1, 1, sep = "-")),
+            units = "days"
+          )
+        ) + 1L
+        
+        # =====================================================
+        # WEATHER MATRIX
+        # =====================================================
+        
+        matrix_weather <- read_weather_WG_comma(
+          year_start,
+          doy_start,
+          NDAYS,
+          file_weather_name
+        )
+        
+        # =====================================================
+        # EMPTY OUTPUT MATRIX
+        # =====================================================
+        
+        y <- matrix(0, NDAYS, NOUT)
+        
+        # =====================================================
+        # PARAMETER TABLE
+        # =====================================================
+        
+        df_params <- read.table(
+          file_params,
+          header = TRUE,
+          sep = "\t",
+          row.names = 1
+        )
+        
+        FWCFC_row <- which(rownames(df_params) == "FWCFC")
+        ROOTDM_row <- which(rownames(df_params) == "ROOTDM")
+        FWCWP_row <- which(rownames(df_params) == "FWCWP")
+        WCST_row <- which(rownames(df_params) == "WCST")
+        
+        params <- df_params[, parcol]
+        
+        # Set initial basal cover
+        BASALI_row <- which(rownames(df_params) == "BASALI")
+        params[BASALI_row] <- 1
+        
+        # =====================================================
+        # PAW LOOP
+        # =====================================================
+        
+        for (PAW in PAWs) {
+          
+          # ------------------------------------------
+          # Soil water calculations
+          # ------------------------------------------
+          
+          PAW30 <- PAW
+          
+          TAW <- PAW30 *
+            params[ROOTDM_row] / 0.3
+          
+          params[FWCFC_row] <-
+            (TAW / (params[ROOTDM_row] * 1000) +
+               params[FWCWP_row] * params[WCST_row]) /
+            params[WCST_row]
+          
+          # Store PAW settings
+          PAWmatrix <- rbind(
+            PAWmatrix,
+            data.frame(
+              PAW = PAW,
+              TAW = TAW
+            )
+          )
+          
+          # ===================================================
+          # RUN MODEL
+          # ===================================================
+          
+          
+          output <- run_model()
+          
+          output <- as.data.frame(output)
+          
+          names(output) <- outputNames
+          
+          # ===================================================
+          # GROWTH RATE
+          # ===================================================
+          
+          output$RDM <- NA
+          
+          for (i in 1:(nrow(output)-1)) {
+            
+            output$RDM[i] <-
+              output$DM[i+1] - output$DM[i]
+            
+            if (output$HARVFR[i+1] > 0) {
+              
+              output$RDM[i] <- NA
+              
+            }
+          }
+          
+          # ===================================================
+          # SOIL MOISTURE DEFICIT
+          # ===================================================
+          
+          output <- output %>%
+            mutate(
+              SMD = (
+                (WCLM / 100) -
+                  params[FWCFC_row] *
+                  params[WCST_row]
+              ) * 1000
+            )
+          
+          # ===================================================
+          # TOTAL YIELD
+          # ===================================================
+          
+          BasalAtLastHarv <- 1
+          
+          output$TOTYIELD <- NA
+          
+          for (i in 1:(nrow(output)-1)) {
+            
+            if (output$HARVFR[i] != 0) {
+              
+              BasalAtLastHarv <- output$BASAL[i]
+              
+            }
+            
+            output$TOTYIELD[i] <-
+              output$YIELD[i] *
+              100 /
+              BasalAtLastHarv
+          }
+          
+          # ===================================================
+          # TOTAL DM
+          # ===================================================
+          
+          output <- output %>%
+            mutate(
+              TOTDM = DM * 100 / BASAL
+            )
+          
+          # ===================================================
+          # SMD TABLE
+          # ===================================================
+          
+          SMDtable <- data.frame(
+            year = output$year,
+            doy  = output$doy,
+            SMD  = output$SMD
+          )
+          
+          # ===================================================
+          # OUTPUT DIRECTORY
+          # ===================================================
+          
+          output_dir <- paste0(
+            "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/",
+            "Processed Output/Output for Tai/"
+          )
+          
+          dir.create(
+            output_dir,
+            recursive = TRUE,
+            showWarnings = FALSE
+          )
+          
+          # ===================================================
+          # OUTPUT FILES
+          # ===================================================
+          
+          output_file <- paste0(
+            output_dir,
+            model, "_",
+            rcp, "_",
+            year_range, "_",
+            longlat,
+            "_PAW", PAW,
+            "_CO2_", CO2,
+            ".csv"
+          )
+          
+          smd_file <- paste0(
+            output_dir,
+            "SMD_",
+            model, "_",
+            rcp, "_",
+            year_range, "_",
+            longlat,
+            "_PAW", PAW,
+            "_CO2_", CO2,
+            ".csv"
+          )
+          
+          # ===================================================
+          # WRITE OUTPUTS
+          # ===================================================
+          
+          write.csv(
+            output,
+            file = output_file,
+            row.names = FALSE
+          )
+          
+          
+          write.csv(
+            SMDtable,
+            file = smd_file,
+            row.names = FALSE
+          )
+          
+          cat(
+            file = stderr(),
+            "Complete:",
+            model,
+            rcp,
+            year_range,
+            longlat,
+            "PAW",
+            PAW,
+            "\n"
+          )
+          
+        } # END PAW LOOP
+        
+      }  #END LOCATION LOOP
+      
+    }  #END RCP LOOP
+    
+  }  #END MODEL LOOP
+  
+}  #END SLICE LOOP
+
+# =========================================================
+# SAVE OUTPUT NAMES
+# =========================================================
+
+saveRDS(
+  names(output),
+  file = paste0(
+    "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/",
+    "basgra_nz-2021/OutputNamesEdendale.rds"
+  )
+)
+
+toc()
+
+cat(
+  file = stderr(),
+  "\nAll BASGRA runs complete\n"
+)
