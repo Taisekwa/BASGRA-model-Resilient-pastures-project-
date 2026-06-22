@@ -1,0 +1,126 @@
+library(tidyverse)
+library(lubridate)
+library(moments)
+
+models <- c("CESM1-CAM5")
+slice_starts <- c(2010)
+rcps <- c("RCP4.5", "RCP8.5")
+
+Gl <- c(168.77501, -46.275, "Gleneden", 50)
+
+Tai_farms <- rbind(Gl)
+colnames(Tai_farms) <- c("Longitude", "Latitude", "FarmID", "PAW")
+Tai_farms <- as.data.frame(Tai_farms)
+
+CO2 <- 350
+
+# ==========================================================
+# Calculate monthly RDM statistics from BASGRA output files
+# ==========================================================
+
+
+
+# ----------------------------------------------------------
+# Location of BASGRA outputs
+# ----------------------------------------------------------
+
+input_dir <- "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/Processed Output/Output for Tai/"
+
+output_dir <- paste0(input_dir, "RDMstats/")
+
+dir.create(output_dir,
+           recursive = TRUE,
+           showWarnings = FALSE)
+
+# ----------------------------------------------------------
+# Find all BASGRA output files
+# ----------------------------------------------------------
+
+files <- list.files(
+  path = input_dir,
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
+
+# Remove SMD files
+files <- files[!grepl("^SMD_", basename(files))]
+
+cat("Files found:", length(files), "\n")
+
+# ----------------------------------------------------------
+# Process each file
+# ----------------------------------------------------------
+
+for (f in files) {
+  
+  cat("Processing:", basename(f), "\n")
+  
+  # --------------------------------------------------------
+  # Read BASGRA output
+  # --------------------------------------------------------
+  
+  dat <- read.csv(f)
+  
+  required_cols <- c("year", "doy", "RDM")
+  
+  if (!all(required_cols %in% names(dat))) {
+    
+    cat("Skipping file - missing columns\n")
+    next
+    
+  }
+  
+  # --------------------------------------------------------
+  # Create date and month
+  # --------------------------------------------------------
+  
+  dat <- dat %>%
+    mutate(
+      Date = as.Date(
+        doy - 1,
+        origin = paste0(year, "-01-01")
+      ),
+      Month = month(Date, label = TRUE, abbr = TRUE)
+    )
+  
+  # --------------------------------------------------------
+  # Monthly statistics
+  # --------------------------------------------------------
+  
+  stats <- dat %>%
+    group_by(Month) %>%
+    summarise(
+      Mean   = mean(RDM, na.rm = TRUE),
+      Median = median(RDM, na.rm = TRUE),
+      Min    = min(RDM, na.rm = TRUE),
+      Max    = max(RDM, na.rm = TRUE),
+      Var    = var(RDM, na.rm = TRUE),
+      SD     = sd(RDM, na.rm = TRUE),
+      Q05    = quantile(RDM, 0.05, na.rm = TRUE),
+      Q25    = quantile(RDM, 0.25, na.rm = TRUE),
+      Q75    = quantile(RDM, 0.75, na.rm = TRUE),
+      Q95    = quantile(RDM, 0.95, na.rm = TRUE),
+      Kurt   = kurtosis(RDM, na.rm = TRUE)
+    )
+  
+  # --------------------------------------------------------
+  # Output filename
+  # --------------------------------------------------------
+  
+  outfile <- paste0(
+    output_dir,
+    tools::file_path_sans_ext(basename(f)),
+    "_MonthlyStats.csv"
+  )
+  
+  
+  write.csv(
+    stats,
+    outfile,
+    row.names = FALSE
+  )
+  
+  cat("Written:", outfile, "\n")
+}
+
+cat("Finished\n")
