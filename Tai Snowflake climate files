@@ -106,24 +106,31 @@ ExampleData <- ClimateData %>%
     pet_penman_mm = PETsrad
   ) %>%
   mutate(
+    # APSIM station number
+    station = 1,
+    
+    # Extract year and day-of-year
+    year = year(CLIMATE_DATE),
+    doy = yday(CLIMATE_DATE),
+    
     # Convert temperatures from Kelvin to Celsius
     tmax_C = tmax_C - 273.15,
     tmin_C = tmin_C - 273.15,
     
-    # Convert solar radiation from W/m² to MJ/m²/day
+    # Convert solar radiation
     radn_MJ_m2 = radn_MJ_m2 * 0.0864
   ) %>%
-  arrange(CLIMATE_DATE)
-ExampleData <- ExampleData %>%
   select(
-    CLIMATE_DATE,
+    station,
+    year,
+    doy,
     tmin_C,
     tmax_C,
     rain_mm,
     radn_MJ_m2,
-    pet_penman_mm,
-    everything()
-  )
+    pet_penman_mm
+  ) %>%
+  arrange(year, doy)
 
 glimpse(ExampleData)
 
