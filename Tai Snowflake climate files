@@ -1,0 +1,136 @@
+#### libraries #####
+library(odbc)
+library(DBI)
+# library(usethis)
+library(tidyverse)
+library(lubridate)
+# library(sf)
+# library(RSQLite)
+# library(googledrive)
+# library(dbplyr)
+# library(zoo)
+# library(patchwork)
+# library(readxl)
+# library(scales)
+# library(stringr)
+# library(ggrepel)
+
+####### connecting to data #########
+
+ClimateDataCon <- DBI::dbConnect(odbc::odbc(),
+                                 Driver = "SnowflakeDSIIDriver",
+                                 Server = "dnz_economics.australia-east.azure.snowflakecomputing.com",
+                                 UID = "taisekwa.chikazhe@dairynz.co.nz",
+                                 Database = "BRONZE",
+                                 Warehouse = "COMPUTE_WH",
+                                 Schema = "NETCDF",
+                                 PWD = "",
+                                 Authenticator = "externalbrowser",
+                                 Tracing = 4)
+
+ClimateData <- tbl(ClimateDataCon, "CLIMATE_DATA_ALL")
+
+# seeing what the data looks like ####
+# Source: https://climatedata.environment.govt.nz/daily-data.html
+
+ClimateData %>%
+  distinct(MODEL) %>% 
+  head(100)
+
+# EC-Earth3_CCAM    
+# NZESM_UM          
+# GFDL-ESM4_CCAM    
+# CNRM-CM6-1_CCAM   
+# ACCESS-CM2_CCAM   
+# AWI-CM-1-1-MR_CCAM
+# NorESM2-MM_CCAM
+
+ClimateData %>%
+  distinct(VARIABLE_ID) %>% 
+  head(100) 
+#rsds = Daily mean incoming solar radiation       
+# tasmax = Daily maximum 2m air temperature     
+# tas = 	Daily mean 2m air temperature        
+# pr = 	Daily accumulated precipitation         
+# hurs = Daily mean 2m relative humidity       
+# sfcWindmax = Daily max 10m wind speed 
+# PEDsrad = Daily Potential Evapotranspiration Deficit    
+# tasmin = Daily minimum 2m air temperature     
+# sfcWind = 	Daily mean 10m wind speed    
+# PETsrad = Daily Potential Evapotranspiration 
+
+ClimateData %>%
+  distinct(SCENARIO) %>% 
+  head(100) 
+# ssp585    
+# ssp245    
+# ssp370    
+# historical
+
+ClimateData %>%
+  group_by(SCENARIO) %>%
+  summarise(
+    min_date = min(CLIMATE_DATE, na.rm = TRUE),
+    max_date = max(CLIMATE_DATE, na.rm = TRUE)
+  ) %>%
+  collect()
+# SCENARIO   min_date   max_date  
+# <chr>      <date>     <date>    
+# ssp585     2015-01-01 2100-12-31
+# historical 1960-01-01 2014-12-31
+# ssp245     2015-01-01 2100-12-31
+# ssp370     2015-01-01 2100-12-31
+
+# Example data ####
+
+ExampleData <- ClimateData %>%
+  filter(
+    LATITUDE > -36.02 & LATITUDE < -35.83,
+    LONGITUDE > 173.76 & LONGITUDE < 174.0,
+    MODEL == "CNRM-CM6-1_CCAM",
+    SCENARIO == "historical",
+    CLIMATE_DATE > "1985-05-31"
+  ) %>%
+  group_by(CLIMATE_DATE, VARIABLE_ID) %>%
+  summarise(VALUE = mean(VALUE), .groups = "drop") %>%
+  collect() %>%
+  pivot_wider(
+    names_from = VARIABLE_ID,
+    values_from = VALUE
+  ) %>%
+  rename(
+    radn_MJ_m2 = rsds,
+    tmax_C = tasmax,
+    tmin_C = tasmin,
+    rain_mm = pr,
+    pet_penman_mm = PETsrad
+  ) %>%
+  mutate(
+    # Convert temperatures from Kelvin to Celsius
+    tmax_C = tmax_C - 273.15,
+    tmin_C = tmin_C - 273.15,
+    
+    # Convert solar radiation from W/m² to MJ/m²/day
+    radn_MJ_m2 = radn_MJ_m2 * 0.0864
+  ) %>%
+  arrange(CLIMATE_DATE)
+ExampleData <- ExampleData %>%
+  select(
+    CLIMATE_DATE,
+    tmin_C,
+    tmax_C,
+    rain_mm,
+    radn_MJ_m2,
+    pet_penman_mm,
+    everything()
+  )
+
+glimpse(ExampleData)
+
+# Save data to CSV
+
+write.csv(
+  ExampleData,
+  "C:/Users/ChikazheT/Documents/ClimateData.csv",
+  row.names = FALSE
+)
