@@ -1,0 +1,57 @@
+library(readr)
+library(dplyr)
+library(ggplot2)
+
+# Read data
+dat <- read_csv("I:/Resilient pastures/BASGRA_nz/BASGRA_Master/Processed Output/Output for Tai/CESM1-CAM5_RCP4.5_2010-2020_168.77501_-46.275_PAW50_CO2_350.csv")
+
+# Plot soil moisture for all years in one graph.
+
+ggplot(dat, aes(x = doy, y = SMD, colour = factor(year))) +
+  geom_line(alpha = 0.7) +
+  labs(
+    x = "Day of Year (DOY)",
+    y = "Soil Moisture Deficit (SMD)",
+    colour = "Year",
+    title = "Seasonal SMD Patterns by Year"
+    
+  ) +
+  theme_bw()
+
+
+# A facet of all the climate years.
+
+ggplot(dat, aes(x = doy, y = SMD)) +
+  geom_line(colour = "steelblue") +
+  facet_wrap(~ year, ncol = 3) +
+  labs(
+    x = "Day of Year",
+    y = "SMD",
+    title = "SMD by DOY for Each Year"
+  ) +
+  theme_bw()
+
+# summarize and show variations on the plot.
+
+library(dplyr)
+
+smd_summary <- dat %>%
+  group_by(doy) %>%
+  summarise(
+    median_smd = median(SMD, na.rm = TRUE),
+    p25 = quantile(SMD, 0.25, na.rm = TRUE),
+    p75 = quantile(SMD, 0.75, na.rm = TRUE)
+  )
+
+ggplot(smd_summary, aes(doy, median_smd)) +
+  geom_ribbon(aes(ymin = p25, ymax = p75),
+              fill = "lightblue", alpha = 0.4) +
+  geom_line(size = 1) +
+  labs(
+    x = "Day of Year",
+    y = "SMD",
+    title = "Median Seasonal SMD Pattern"
+  ) +
+  theme_bw()
+
+
