@@ -38,7 +38,7 @@ ClimateData %>%
   head(100)
 
 # EC-Earth3_CCAM    
-# NZESM_UM          
+# NZESM_UM #do not use this one.         
 # GFDL-ESM4_CCAM    
 # CNRM-CM6-1_CCAM   
 # ACCESS-CM2_CCAM   
@@ -81,63 +81,157 @@ ClimateData %>%
 # ssp245     2015-01-01 2100-12-31
 # ssp370     2015-01-01 2100-12-31
 
-# Example data ####
 
-ExampleData <- ClimateData %>%
-  filter(
-    LATITUDE > -36.02 & LATITUDE < -35.83,
-    LONGITUDE > 173.76 & LONGITUDE < 174.0,
-    MODEL == "CNRM-CM6-1_CCAM",
-    SCENARIO == "historical",
-    CLIMATE_DATE > "1985-05-31"
-  ) %>%
-  group_by(CLIMATE_DATE, VARIABLE_ID) %>%
-  summarise(VALUE = mean(VALUE), .groups = "drop") %>%
-  collect() %>%
-  pivot_wider(
-    names_from = VARIABLE_ID,
-    values_from = VALUE
-  ) %>%
-  rename(
-    radn_MJ_m2 = rsds,
-    tmax_C = tasmax,
-    tmin_C = tasmin,
-    rain_mm = pr,
-    pet_penman_mm = PETsrad
-  ) %>%
-  mutate(
-    # APSIM station number
-    station = 1,
-    
-    # Extract year and day-of-year
-    year = year(CLIMATE_DATE),
-    doy = yday(CLIMATE_DATE),
-    
-    # Convert temperatures from Kelvin to Celsius
-    tmax_C = tmax_C - 273.15,
-    tmin_C = tmin_C - 273.15,
-    
-    # Convert solar radiation
-    radn_MJ_m2 = radn_MJ_m2 * 0.0864
-  ) %>%
-  select(
-    station,
-    year,
-    doy,
-    tmin_C,
-    tmax_C,
-    rain_mm,
-    radn_MJ_m2,
-    pet_penman_mm
-  ) %>%
-  arrange(year, doy)
 
-glimpse(ExampleData)
+#### Climate models to download ####
 
-# Save data to CSV
-
-write.csv(
-  ExampleData,
-  "C:/Users/ChikazheT/Documents/ClimateData.csv",
-  row.names = FALSE
+models <- c(
+  "GFDL-ESM4_CCAM",
+  "CNRM-CM6-1_CCAM",
+  "ACCESS-CM2_CCAM",
+  "AWI-CM-1-1-MR_CCAM",
+  "NorESM2-MM_CCAM",
+  "EC-Earth3_CCAM"
 )
+
+#### Periods to extract including climate scenarios ####
+
+periods <- tibble::tribble(
+  ~period_name, ~scenario,     ~start_date,           ~end_date,
+  "1985-2015",  "historical",  as.Date("1985-01-01"), as.Date("2014-12-31"),
+  "2040-2060",  "ssp245",      as.Date("2040-01-01"), as.Date("2060-12-31"),
+  "2040-2060",  "ssp370",      as.Date("2040-01-01"), as.Date("2060-12-31"),
+  "2080-2100",  "ssp245",      as.Date("2080-01-01"), as.Date("2100-12-31"),
+  "2080-2100",  "ssp370",      as.Date("2080-01-01"), as.Date("2100-12-31")
+)
+
+#### Output folder ####
+
+output_folder <- "C:/Users/ChikazheT/Documents/ClimateData"
+
+dir.create(output_folder,
+           recursive = TRUE,
+           showWarnings = FALSE)
+
+#### Download climate data and change data to suit BASGRA ####
+
+for(i in seq_len(nrow(periods))) {
+  
+  period_name <- periods$period_name[i]
+  scenario    <- periods$scenario[i]
+  start_date  <- periods$start_date[i]
+  end_date    <- periods$end_date[i]
+  
+  for(model in models) {
+    
+    message(
+      "Processing: ",
+      model,
+      " | ",
+      scenario,
+      " | ",
+      period_name
+    )
+    
+    climate_data_model <- ClimateData %>%
+      filter(
+        abs(LATITUDE - (-36.125)) < 0.001,
+        abs(LONGITUDE - 173.925) < 0.001,
+        MODEL == model,
+        SCENARIO == scenario,
+        between(CLIMATE_DATE,
+                start_date,
+                end_date)
+      ) %>%
+      group_by(CLIMATE_DATE, VARIABLE_ID) %>%
+      summarise(
+        VALUE = mean(VALUE),
+        .groups = "drop"
+      ) %>%
+      collect() %>%
+      pivot_wider(
+        names_from = VARIABLE_ID,
+        values_from = VALUE
+      ) %>%
+      ## renaming parameters for BASGRA
+      rename(
+        radn_MJ_m2 = rsds,
+        tmax_C = tasmax,
+        tmin_C = tasmin,
+        rain_mm = pr,
+        pet_penman_mm = PETsrad
+      ) %>%
+      mutate(
+        station = 1,
+        year = year(CLIMATE_DATE),
+        doy = yday(CLIMATE_DATE),
+        
+        ## changing kelvins to degrees Celsius.
+        tmax_C = tmax_C - 273.15,
+        tmin_C = tmin_C - 273.15,
+        
+        ## changing radn_W_m2 to radn_MJ_m2
+        
+        radn_MJ_m2 = radn_MJ_m2 * 0.0864
+      ) %>%
+      select(
+        station,
+        year,
+        doy,
+        tmin_C,
+        tmax_C,
+        rain_mm,
+        radn_MJ_m2,
+        pet_penman_mm
+      ) %>%
+      arrange(year, doy)
+    
+    if(nrow(climate_data_model) > 0) {
+      
+      #### Create folders ####
+      
+      period_folder <- file.path(
+        output_folder,
+        period_name
+      )
+      
+      model_folder <- file.path(
+        period_folder,
+        model
+      )
+      
+      dir.create(
+        model_folder,
+        recursive = TRUE,
+        showWarnings = FALSE
+      )
+      
+      #### Save file ####
+      
+      file_path <- file.path(
+        model_folder,
+        paste0(scenario, ".csv")
+      )
+      
+      write.csv(
+        climate_data_model,
+        file_path,
+        row.names = FALSE
+      )
+      
+      message("Saved: ", file_path)
+      
+    } else {
+      
+      message(
+        "No data found for ",
+        model,
+        " ",
+        scenario,
+        " ",
+        period_name
+      )
+      
+    }
+  }
+}
