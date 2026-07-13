@@ -105,9 +105,14 @@ periods <- tibble::tribble(
   "2080-2100",  "ssp370",      as.Date("2080-01-01"), as.Date("2100-12-31")
 )
 
+#### Site coordinates ####
+
+site_long <- 173.925
+site_lat  <- -36.125
+
 #### Output folder ####
 
-output_folder <- "C:/Users/ChikazheT/Documents/ClimateData"
+output_folder <- "C:/Users/ChikazheT/Documents/Northland_ClimateData"
 
 dir.create(output_folder,
            recursive = TRUE,
@@ -135,8 +140,8 @@ for(i in seq_len(nrow(periods))) {
     
     climate_data_model <- ClimateData %>%
       filter(
-        abs(LATITUDE - (-36.125)) < 0.001,
-        abs(LONGITUDE - 173.925) < 0.001,
+        abs(LATITUDE - site_lat) < 0.001,
+        abs(LONGITUDE - site_long) < 0.001,
         MODEL == model,
         SCENARIO == scenario,
         between(CLIMATE_DATE,
@@ -145,7 +150,7 @@ for(i in seq_len(nrow(periods))) {
       ) %>%
       group_by(CLIMATE_DATE, VARIABLE_ID) %>%
       summarise(
-        VALUE = mean(VALUE),
+        VALUE = mean(VALUE, na.rm = TRUE),
         .groups = "drop"
       ) %>%
       collect() %>%
@@ -153,12 +158,11 @@ for(i in seq_len(nrow(periods))) {
         names_from = VARIABLE_ID,
         values_from = VALUE
       ) %>%
-      ## renaming parameters for BASGRA
       rename(
-        radn_MJ_m2 = rsds,
-        tmax_C = tasmax,
-        tmin_C = tasmin,
-        rain_mm = pr,
+        radn_MJ_m2   = rsds,
+        tmax_C       = tasmax,
+        tmin_C       = tasmin,
+        rain_mm      = pr,
         pet_penman_mm = PETsrad
       ) %>%
       mutate(
@@ -166,11 +170,8 @@ for(i in seq_len(nrow(periods))) {
         year = year(CLIMATE_DATE),
         doy = yday(CLIMATE_DATE),
         
-        ## changing kelvins to degrees Celsius.
         tmax_C = tmax_C - 273.15,
         tmin_C = tmin_C - 273.15,
-        
-        ## changing radn_W_m2 to radn_MJ_m2
         
         radn_MJ_m2 = radn_MJ_m2 * 0.0864
       ) %>%
@@ -208,9 +209,19 @@ for(i in seq_len(nrow(periods))) {
       
       #### Save file ####
       
+      #### Save file ####
+      
+      file_name <- sprintf(
+        "%.3f_%.3f_%s_%s.csv",
+        site_long,
+        site_lat,
+        model,
+        scenario
+      )
+      
       file_path <- file.path(
         model_folder,
-        paste0(scenario, ".csv")
+        file_name
       )
       
       write.csv(
@@ -220,17 +231,6 @@ for(i in seq_len(nrow(periods))) {
       )
       
       message("Saved: ", file_path)
-      
-    } else {
-      
-      message(
-        "No data found for ",
-        model,
-        " ",
-        scenario,
-        " ",
-        period_name
-      )
       
     }
   }
