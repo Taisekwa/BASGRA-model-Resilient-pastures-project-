@@ -24,8 +24,13 @@ BASGRA_DLL <- "model/BASGRA_WG.DLL"
 # -----------------------------
 # User options
 # -----------------------------
-models      <- c("CESM1-CAM5")
-slice_starts <- c(2010)
+models      <- c( "GFDL-ESM4_CCAM",
+                  "CNRM-CM6-1_CCAM",
+                  "ACCESS-CM2_CCAM",
+                  "AWI-CM-1-1-MR_CCAM",
+                  "NorESM2-MM_CCAM",
+                  "EC-Earth3_CCAM")
+slice_starts <- c(1985, 2040, 2080)
 parameters  <- c("run_mean")
 PAWs        <- c(50)
 CO2         <- 350
@@ -41,24 +46,24 @@ for (slice_start in slice_starts) {
   # -----------------------------
   # Time slice settings
   # -----------------------------
-  slice_length <- 10
+  slice_length <- 20
   slice_end    <- slice_start + slice_length
   year_range   <- paste0(slice_start, "-", slice_end)
   
   # -----------------------------
   # Location file
   # -----------------------------
-  file_longlats_name <- "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/PAW/PAW data from Landcare/VCSN_Edendale_WGS84_fixed.csv"
+  #file_longlats_name <- "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/PAW/PAW data from Landcare/VCSN_Edendale_WGS84_fixed.csv"
   
-  file_longlats <- read.csv(file_longlats_name)
+  #file_longlats <- read.csv(file_longlats_name)
   
   # Optional: create coordinates from file
   # longs <- file_longlats[,2]
   # lats  <- file_longlats[,3]
   # longlats <- paste0(longs, "_", lats)
   
-  # Manual location
-  longlats <- c("168.77501_-46.275")
+  # Manual location for Northland case study farm
+  longlats <- c("173.925_-36.125")
   
   # -----------------------------
   # Initialise BASGRA
@@ -72,75 +77,48 @@ for (slice_start in slice_starts) {
   for (model in models) {
     
     # -----------------------------
-    # RCP selection
+    # Scenario selection
     # -----------------------------
-    if (slice_start %in% c(1980, 1990)) {
-      rcps <- c("RCPpast")
-    } else {
-      rcps <- c("RCP8.5", "RCP4.5")
+    if (slice_start == 1985) {
+      year_range <- "1985-2015"
+      scenarios <- "historical"
+      slice_end <- 2014
     }
     
-    for (rcp in rcps) {
+    if (slice_start == 2040) {
+      year_range <- "2040-2060"
+      scenarios <- c("ssp245","ssp370")
+      slice_end <- 2060
+    }
+    
+    if (slice_start == 2080) {
+      year_range <- "2080-2100"
+      scenarios <- c("ssp245","ssp370")
+      slice_end <- 2100
+    }
+    for (scenario in scenarios) {
       
       for (longlat in longlats) {
         
-        cat(file = stderr(),
-            "\nRunning:",
-            model,
-            rcp,
-            year_range,
-            longlat,
-            "\n")
-        
-        # =====================================================
-        # WEATHER FILE
-        # =====================================================
-        
-        file_weather_name <- paste0(
-          "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/Climate/",
-          "BASGRA Climate - Gleneden/",
-          year_range, "/",
-          model, "/",
-          longlat, "_",
-          model, "_",
-          rcp,
-          ".csv"
+        file_weather_name <- file.path(
+          "C:/Users/ChikazheT/Documents/Northland_ClimateData",
+          year_range,
+          model,
+          paste0(longlat, "_", model, "_", scenario, ".csv")
         )
+        
+        cat("Looking for:\n", file_weather_name, "\n")
         
         if (!file.exists(file_weather_name)) {
-          
-          warning(paste("Weather file missing:", file_weather_name))
+          warning(
+            paste(
+              "Weather file missing:",
+              file_weather_name
+            )
+          )
           next
-          
         }
         
-        file_weather <- read.csv(
-          file_weather_name,
-          header = FALSE
-        )
-        
-        # Remove last row if problematic
-        file_weather <- head(file_weather, -1)
-        
-        # Remove junk row if empty
-        if (nrow(file_weather) >= 367) {
-          
-          if (file_weather$V2[367] == "") {
-            
-            file_weather <- file_weather[-367, ]
-            
-          }
-        }
-        
-        # Rewrite cleaned weather file
-        write.table(
-          file_weather,
-          file = file_weather_name,
-          quote = FALSE,
-          sep = ",",
-          col.names = FALSE,
-          row.names = FALSE
-        )
         
         # =====================================================
         # PARAMETERS
@@ -148,8 +126,10 @@ for (slice_start in slice_starts) {
         
         parameter_location <- "run_mean"
         
-        file_params  <- paste0(parameter_location,
-                               "/BASGRA_parModes.txt")
+        file_params <- paste0(
+          parameter_location,
+          "/BASGRA_parModes.txt"
+        )
         
         parcol <- 2 + 8 * (2 - 1)
         
@@ -162,7 +142,6 @@ for (slice_start in slice_starts) {
           )
         )
         
-        # Automated harvest option
         if (days_harvest[1,1] == -1) {
           
           days_harvest <- matrix(
@@ -194,34 +173,79 @@ for (slice_start in slice_starts) {
         
         NDAYS <- as.integer(
           difftime(
-            as.Date(doy_stop - 1,
-                    origin = paste(year_stop, 1, 1, sep = "-")),
-            as.Date(doy_start - 1,
-                    origin = paste(year_start, 1, 1, sep = "-")),
+            as.Date(
+              doy_stop - 1,
+              origin = paste(year_stop,1,1,sep="-")
+            ),
+            as.Date(
+              doy_start - 1,
+              origin = paste(year_start,1,1,sep="-")
+            ),
             units = "days"
           )
         ) + 1L
         
-        # =====================================================
-        # WEATHER MATRIX
-        # =====================================================
+        cat("\n=============================\n")
+        cat("Model      :", model, "\n")
+        cat("Scenario   :", scenario, "\n")
+        cat("Year range :", year_range, "\n")
+        cat("Weather file:\n", file_weather_name, "\n")
+        cat("Exists?    :", file.exists(file_weather_name), "\n")
+        cat("=============================\n")
         
-        matrix_weather <- read_weather_WG_comma(
-          year_start,
-          doy_start,
-          NDAYS,
-          file_weather_name
-        )
+        tmp <- read.csv(file_weather_name)
         
-        # =====================================================
-        # EMPTY OUTPUT MATRIX
-        # =====================================================
+        cat("\nDEBUG\n")
+        cat("Rows =", nrow(tmp), "\n")
+        cat("Cols =", ncol(tmp), "\n")
+        cat("NDAYS =", NDAYS, "\n")
+        cat("Column names:\n")
+        print(names(tmp))
+        
+        read_weather_WG_comma <- function(y = year_start,
+                                          d = doy_start,
+                                          n = NDAYS,
+                                          f = file_weather) {
+          
+          df_weather <- read.table(f, header = TRUE, sep = ",")
+          
+          colnames(df_weather) <- c(
+            "ST","YR","doy","TMMNI",
+            "TMMXI","RAINI","GR","PETI"
+          )
+          
+          row_start <- 1
+          
+          while(df_weather[row_start,]$YR < y)
+            row_start <- row_start + 1
+          
+          while(df_weather[row_start,]$doy < d)
+            row_start <- row_start + 1
+          
+          df_weather_sim <- df_weather[row_start:(row_start+n-1),]
+          
+          NMAXDAYS <- max(10000, n)
+          
+          NWEATHER <- 7
+          
+          matrix_weather <- matrix(
+            0,
+            nrow = NMAXDAYS,
+            ncol = NWEATHER
+          )
+          
+          matrix_weather[1:n,1] <- df_weather_sim$YR
+          matrix_weather[1:n,2] <- df_weather_sim$doy
+          matrix_weather[1:n,3] <- df_weather_sim$GR
+          matrix_weather[1:n,4] <- df_weather_sim$TMMNI
+          matrix_weather[1:n,5] <- df_weather_sim$TMMXI
+          matrix_weather[1:n,6] <- df_weather_sim$RAINI
+          matrix_weather[1:n,7] <- df_weather_sim$PETI
+          
+          matrix_weather
+        }
         
         y <- matrix(0, NDAYS, NOUT)
-        
-        # =====================================================
-        # PARAMETER TABLE
-        # =====================================================
         
         df_params <- read.table(
           file_params,
@@ -237,16 +261,10 @@ for (slice_start in slice_starts) {
         
         params <- df_params[, parcol]
         
-        # Set initial basal cover
         BASALI_row <- which(rownames(df_params) == "BASALI")
         params[BASALI_row] <- 1
         
-        # =====================================================
-        # PAW LOOP
-        # =====================================================
-        
         for (PAW in PAWs) {
-          
           # ------------------------------------------
           # Soil water calculations
           # ------------------------------------------
@@ -261,6 +279,7 @@ for (slice_start in slice_starts) {
                params[FWCWP_row] * params[WCST_row]) /
             params[WCST_row]
           
+          
           # Store PAW settings
           PAWmatrix <- rbind(
             PAWmatrix,
@@ -274,12 +293,29 @@ for (slice_start in slice_starts) {
           # RUN MODEL
           # ===================================================
           
+          # ===================================================
+          # READ WEATHER DATA FOR BASGRA
+          # ===================================================
+          
+          file_weather <- file_weather_name
+          
+          matrix_weather <- read_weather_WG_comma(
+            y = year_start,
+            d = doy_start,
+            n = NDAYS,
+            f = file_weather
+          )
+          
+          cat("Weather matrix created:",
+              nrow(matrix_weather),
+              "rows\n")
           
           output <- run_model()
           
           output <- as.data.frame(output)
           
           names(output) <- outputNames
+          
           
           # ===================================================
           # GROWTH RATE
@@ -347,11 +383,11 @@ for (slice_start in slice_starts) {
           # SMD TABLE
           # ===================================================
           
-          SMDtable <- data.frame(
-            year = output$year,
-            doy  = output$doy,
-            SMD  = output$SMD
-          )
+          #SMDtable <- data.frame(
+           # year = output$year,
+           # doy  = output$doy,
+           # SMD  = output$SMD
+         # )
           
           # ===================================================
           # OUTPUT DIRECTORY
@@ -375,7 +411,7 @@ for (slice_start in slice_starts) {
           output_file <- paste0(
             output_dir,
             model, "_",
-            rcp, "_",
+            scenario, "_",
             year_range, "_",
             longlat,
             "_PAW", PAW,
@@ -383,17 +419,17 @@ for (slice_start in slice_starts) {
             ".csv"
           )
           
-          smd_file <- paste0(
-            output_dir,
-            "SMD_",
-            model, "_",
-            rcp, "_",
-            year_range, "_",
-            longlat,
-            "_PAW", PAW,
-            "_CO2_", CO2,
-            ".csv"
-          )
+          #smd_file <- paste0(
+            #output_dir,
+           # "SMD_",
+            #model, "_",
+            #scenario, "_",
+           # year_range, "_",
+           # longlat,
+           # "_PAW", PAW,
+           # "_CO2_", CO2,
+           # ".csv"
+          #)
           
           # ===================================================
           # WRITE OUTPUTS
@@ -406,17 +442,17 @@ for (slice_start in slice_starts) {
           )
           
           
-          write.csv(
-            SMDtable,
-            file = smd_file,
-            row.names = FALSE
-          )
+          #write.csv(
+            #SMDtable,
+            #file = smd_file,
+           # row.names = FALSE
+          #)
           
           cat(
             file = stderr(),
             "Complete:",
             model,
-            rcp,
+            scenario,
             year_range,
             longlat,
             "PAW",
@@ -428,23 +464,27 @@ for (slice_start in slice_starts) {
         
       }  #END LOCATION LOOP
       
-    }  #END RCP LOOP
+    }  #END Scenario LOOP
     
-  }  #END MODEL LOOP
+} #END MODEL LOOP
   
-}  #END SLICE LOOP
+} #END SLICE LOOP
 
 # =========================================================
 # SAVE OUTPUT NAMES
 # =========================================================
 
-saveRDS(
-  names(output),
-  file = paste0(
-    "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/",
-    "basgra_nz-2021/OutputNamesEdendale.rds"
+if (exists("output")) {
+  
+  saveRDS(
+    names(output),
+    file = paste0(
+      "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/",
+      "basgra_nz-2021/OutputNamesEdendale.rds"
+    )
   )
-)
+  
+}
 
 toc()
 
@@ -452,3 +492,8 @@ cat(
   file = stderr(),
   "\nAll BASGRA runs complete\n"
 )
+
+
+
+
+
