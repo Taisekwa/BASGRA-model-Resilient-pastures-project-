@@ -2,13 +2,21 @@ library(tidyverse)
 library(lubridate)
 library(moments)
 
-models <- c("CESM1-CAM5")
-slice_starts <- c(2010)
-rcps <- c("RCP4.5", "RCP8.5")
+setwd("I:/Resilient pastures/BASGRA_nz/BASGRA_Master/basgra_nz-2021")
 
-Gl <- c(168.77501, -46.275, "Gleneden", 50)
+models <- c("GFDL-ESM4_CCAM",
+            "CNRM-CM6-1_CCAM",
+            "ACCESS-CM2_CCAM",
+            "AWI-CM-1-1-MR_CCAM",
+            "NorESM2-MM_CCAM",
+            "EC-Earth3_CCAM")
 
-Tai_farms <- rbind(Gl)
+slice_starts <- c(1985)
+scenario <- c("historical", "ssp245", "ssp370")
+
+Northland <- c(173.925, -36.125, "Northland", 50)
+
+Tai_farms <- rbind(Northland)
 colnames(Tai_farms) <- c("Longitude", "Latitude", "FarmID", "PAW")
 Tai_farms <- as.data.frame(Tai_farms)
 
@@ -26,6 +34,15 @@ CO2 <- 350
 
 input_dir <- "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/Processed Output/Output for Tai/"
 
+files <- list.files(
+  path = input_dir,
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
+
+cat(length(files), "files found\n")
+print(basename(files))
+
 output_dir <- paste0(input_dir, "RDMstats/")
 
 dir.create(output_dir,
@@ -33,94 +50,197 @@ dir.create(output_dir,
            showWarnings = FALSE)
 
 # ----------------------------------------------------------
-# Find all BASGRA output files
+# Read all files and combine them
 # ----------------------------------------------------------
 
-files <- list.files(
-  path = input_dir,
-  pattern = "\\.csv$",
-  full.names = TRUE
-)
-
-# Remove SMD files
-files <- files[!grepl("^SMD_", basename(files))]
-
-cat("Files found:", length(files), "\n")
-
-# ----------------------------------------------------------
-# Process each file
-# ----------------------------------------------------------
+all_data <- data.frame()
 
 for (f in files) {
   
-  cat("Processing:", basename(f), "\n")
-  
-  # --------------------------------------------------------
-  # Read BASGRA output
-  # --------------------------------------------------------
+  cat("Reading:", basename(f), "\n")
   
   dat <- read.csv(f)
   
-  required_cols <- c("year", "doy", "RDM")
+  required_cols <- c("year","doy","RDM")
   
-  if (!all(required_cols %in% names(dat))) {
-    
-    cat("Skipping file - missing columns\n")
+  if(!all(required_cols %in% names(dat))){
     next
-    
   }
   
-  # --------------------------------------------------------
-  # Create date and month
-  # --------------------------------------------------------
+  # Convert DOY to Date (handles leap years automatically)
+  dat$Date <- as.Date(paste0(dat$year, "-01-01")) + dat$doy - 1
   
-  dat <- dat %>%
-    mutate(
-      Date = as.Date(
-        doy - 1,
-        origin = paste0(year, "-01-01")
-      ),
-      Month = month(Date, label = TRUE, abbr = TRUE)
-    )
+  dat$Month <- month(dat$Date,
+                     label = TRUE,
+                     abbr = FALSE)
   
-  # --------------------------------------------------------
-  # Monthly statistics
-  # --------------------------------------------------------
+  filename <- tools::file_path_sans_ext(basename(f))
   
-  stats <- dat %>%
-    group_by(Month) %>%
-    summarise(
-      Mean   = mean(RDM, na.rm = TRUE),
-      Median = median(RDM, na.rm = TRUE),
-      Min    = min(RDM, na.rm = TRUE),
-      Max    = max(RDM, na.rm = TRUE),
-      Var    = var(RDM, na.rm = TRUE),
-      SD     = sd(RDM, na.rm = TRUE),
-      Q05    = quantile(RDM, 0.05, na.rm = TRUE),
-      Q25    = quantile(RDM, 0.25, na.rm = TRUE),
-      Q75    = quantile(RDM, 0.75, na.rm = TRUE),
-      Q95    = quantile(RDM, 0.95, na.rm = TRUE),
-      Kurt   = kurtosis(RDM, na.rm = TRUE)
-    )
-  
-  # --------------------------------------------------------
-  # Output filename
-  # --------------------------------------------------------
-  
-  outfile <- paste0(
-    output_dir,
-    tools::file_path_sans_ext(basename(f)),
-    "_MonthlyStats.csv"
+  # -----------------------------
+  # Extract Model
+  # -----------------------------
+  dat$Model <- str_extract(
+    filename,
+    paste(models, collapse = "|")
   )
   
-  
-  write.csv(
-    stats,
-    outfile,
-    row.names = FALSE
+  # -----------------------------
+  # Extract Scenario
+  # -----------------------------
+  dat$Scenario <- case_when(
+    str_detect(filename, "historical") ~ "historical",
+    str_detect(filename, "ssp245") ~ "ssp245",
+    str_detect(filename, "ssp370") ~ "ssp370"
   )
   
-  cat("Written:", outfile, "\n")
+  # -----------------------------
+  # Extract Year Range
+  # -----------------------------
+  dat$YearRange <- case_when(
+    str_detect(filename, "1985-2015") ~ "1985-2015",
+    str_detect(filename, "2040-2060") ~ "2040-2060",
+    str_detect(filename, "2080-2100") ~ "2080-2100"
+  )
+  
+  all_data <- bind_rows(all_data,dat)
+  
 }
+  
+  # --------------------------------------------------------
+  # Calculate statistics
+  # --------------------------------------------------------
+  
+monthly_stats <-
+  all_data %>%
+  group_by(YearRange,
+           Scenario,
+           Model,
+           Month) %>%
+  summarise(
+    Mean   = mean(RDM, na.rm = TRUE),
+    Median = median(RDM, na.rm = TRUE),
+    Min    = min(RDM, na.rm = TRUE),
+    Max    = max(RDM, na.rm = TRUE),
+    SD     = sd(RDM, na.rm = TRUE),
+    .groups = "drop"
+  )
+  
+  # --------------------------------------------------------
+  # Put months in calendar order
+  # --------------------------------------------------------
+  
+monthly_stats$Month <-
+  factor(monthly_stats$Month,
+         levels = month.name,
+         ordered = TRUE)
 
-cat("Finished\n")
+monthly_stats <-
+  arrange(monthly_stats,
+          YearRange,
+          Scenario,
+          Model,
+          Month)
+  
+# ==========================================================
+# Plot monthly median RDM
+# ==========================================================
+
+library(ggplot2)
+
+
+p_RDM <- ggplot(
+  monthly_stats,
+  aes(
+    x = Month,
+    y = Median,
+    colour = Model,
+    group = Model
+  )
+) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_grid(
+    Scenario ~ YearRange
+  ) +
+  labs(
+    x = "Month",
+    y = "Median Residual Dry Matter (kg DM/ha)",
+    colour = "Climate model",
+    title = "Monthly Median Residual Dry Matter (RDM)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1
+    ),
+    strip.text = element_text(face = "bold")
+  )
+
+
+print(p_RDM)
+  # --------------------------------------------------------
+  # Mean table
+  # --------------------------------------------------------
+mean_table <-
+  monthly_stats %>%
+  select(Model,
+         Scenario,
+         Month,
+         YearRange,
+         Mean) %>%
+  pivot_wider(
+    names_from = YearRange,
+    values_from = Mean
+  ) %>%
+  arrange(Model, Scenario, Month)
+
+#Meadian table
+median_table <-
+  monthly_stats %>%
+  select(Model,
+         Scenario,
+         Month,
+         YearRange,
+         Median) %>%
+  pivot_wider(
+    names_from = YearRange,
+    values_from = Median
+  ) %>%
+  arrange(Model, Scenario, Month)
+
+#Save them
+write.csv(
+  mean_table,
+  file.path(output_dir,
+            "Monthly_RDM_Mean.csv"),
+  row.names = FALSE
+)
+
+write.csv(
+  median_table,
+  file.path(output_dir,
+            "Monthly_RDM_Median.csv"),
+  row.names = FALSE
+)
+
+
+variability_table <-
+  monthly_stats %>%
+  select(
+    Model,
+    Scenario,
+    Month,
+    YearRange,
+    Min,
+    Max,
+    SD
+  ) %>%
+  arrange(Model, Scenario, Month, YearRange)
+
+write.csv(
+  variability_table,
+  file.path(output_dir, "Monthly_RDM_Variability.csv"),
+  row.names = FALSE
+)
+
