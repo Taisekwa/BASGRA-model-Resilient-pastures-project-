@@ -1,57 +1,201 @@
+#Step 1. Read all CSV files
+
 library(readr)
 library(dplyr)
+library(stringr)
+library(lubridate)
 library(ggplot2)
 
-# Read data
-dat <- read_csv("I:/Resilient pastures/BASGRA_nz/BASGRA_Master/Processed Output/Output for Tai/CESM1-CAM5_RCP4.5_2010-2020_168.77501_-46.275_PAW50_CO2_350.csv")
 
-# Plot soil moisture for all years in one graph.
+input_dir <- "I:/Resilient pastures/BASGRA_nz/BASGRA_Master/Processed Output/Output for Tai"
 
-ggplot(dat, aes(x = doy, y = SMD, colour = factor(year))) +
-  geom_line(alpha = 0.7) +
-  labs(
-    x = "Day of Year (DOY)",
-    y = "Soil Moisture Deficit (SMD)",
-    colour = "Year",
-    title = "Seasonal SMD Patterns by Year"
-    
-  ) +
-  theme_bw()
+models <- c(
+  "ACCESS-CM2",
+  "AWI-CM-1-1-MR",
+  "CNRM-CM6-1",
+  "EC-Earth3",
+  "GFDL-ESM4",
+  "NorESM2-MM"
+)
+
+files <- list.files(
+  input_dir,
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
+
+files <- list.files(
+  input_dir,
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
 
 
-# A facet of all the climate years.
+all_data <- lapply(files, function(f){
+  
+  filename <- basename(f)
+  
+  cat("Reading:", filename, "\n")
+  
+  
+  dat <- read_csv(
+    f,
+    show_col_types = FALSE
+  )
+  
+  
+  # Create date
+  dat <- dat %>%
+    mutate(
+      Date = as.Date(paste0(year, "-01-01")) + doy - 1,
+      Month = month(Date, label = TRUE, abbr = FALSE)
+    )
+  
+  
+  # Extract climate model
+  model <- str_extract(
+    filename,
+    paste(models, collapse = "|")
+  )
+  
+  
+  # Extract scenario
+  scenario <- case_when(
+    str_detect(filename, "historical") ~ "historical",
+    str_detect(filename, "ssp245") ~ "ssp245",
+    str_detect(filename, "ssp370") ~ "ssp370",
+    TRUE ~ NA_character_
+  )
+  
+  
+  # Extract time slice
+  year_range <- case_when(
+    str_detect(filename, "1985-2015") ~ "1985-2014",
+    str_detect(filename, "2040-2060") ~ "2040-2059",
+    str_detect(filename, "2080-2100") ~ "2080-2099",
+    TRUE ~ NA_character_
+  )
+  
+  
+  dat %>%
+    mutate(
+      Model = model,
+      Scenario = scenario,
+      YearRange = year_range
+    )
+  
+})
 
-ggplot(dat, aes(x = doy, y = SMD)) +
-  geom_line(colour = "steelblue") +
-  facet_wrap(~ year, ncol = 3) +
-  labs(
-    x = "Day of Year",
-    y = "SMD",
-    title = "SMD by DOY for Each Year"
-  ) +
-  theme_bw()
 
-# summarize and show variations on the plot.
+dat <- bind_rows(all_data)
 
-library(dplyr)
-
-smd_summary <- dat %>%
-  group_by(doy) %>%
+# Calculate monthly statistics
+smd_summary <-
+  dat %>%
+  group_by(
+    Model,
+    Scenario,
+    YearRange,
+    Month
+  ) %>%
   summarise(
-    median_smd = median(SMD, na.rm = TRUE),
-    p25 = quantile(SMD, 0.25, na.rm = TRUE),
-    p75 = quantile(SMD, 0.75, na.rm = TRUE)
+    Median = median(SMD, na.rm = TRUE),
+    Mean   = mean(SMD, na.rm = TRUE),
+    P25    = quantile(SMD, 0.25, na.rm = TRUE),
+    P75    = quantile(SMD, 0.75, na.rm = TRUE),
+    .groups = "drop"
   )
 
-ggplot(smd_summary, aes(doy, median_smd)) +
-  geom_ribbon(aes(ymin = p25, ymax = p75),
-              fill = "lightblue", alpha = 0.4) +
-  geom_line(size = 1) +
+#Put the months in Calenda order
+
+smd_summary$Month <- factor(
+  smd_summary$Month,
+  levels = month.name,
+  ordered = TRUE
+)
+
+
+#Step 2. Plot monthly mean growth
+
+p1 <- ggplot(smd_summary,
+             aes(x = Month,
+                 y = Median,
+                 colour = Model,
+                 group = Model)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_grid(Scenario ~ YearRange) +
   labs(
-    x = "Day of Year",
-    y = "SMD",
-    title = "Median Seasonal SMD Pattern"
+    x = "Month",
+    y = "Median Soil Moisture Deficit (SMD)",
+    title = "Monthly Median Soil Moisture Deficit"
   ) +
-  theme_bw()
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p1)
+
+#Step 3. Plot median seasonal SMD
+
+smd_summary <-
+  dat %>%
+  group_by(Model,
+           Scenario,
+           YearRange,
+           Month) %>%
+  summarise(
+    Median = median(SMD, na.rm = TRUE),
+    P25 = quantile(SMD,0.25,na.rm=TRUE),
+    P75 = quantile(SMD,0.75,na.rm=TRUE),
+    .groups="drop"
+  )
+
+# Plotting SMD summary
+
+p2 <- ggplot(smd_summary,
+             aes(x = Month,
+                 y = Median,
+                 colour = Model,
+                 group = Model)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_grid(Scenario ~ YearRange) +
+  labs(
+    x = "Month",
+    y = "Median Soil Moisture Deficit (SMD)",
+    title = "Monthly Median Soil Moisture Deficit"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p2)
+
+# Plot variability
+
+p3 <- ggplot(smd_summary,
+             aes(x = Month,
+                 y = Median,
+                 colour = Model,
+                 fill = Model,
+                 group = Model)) +
+  geom_ribbon(aes(ymin = P25, ymax = P75),
+              alpha = 0.15,
+              colour = NA) +
+  geom_line(linewidth = 1) +
+  facet_grid(Scenario ~ YearRange) +
+  labs(
+    x = "Month",
+    y = "Median Soil Moisture Deficit (SMD)"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+print(p3)
 
 
